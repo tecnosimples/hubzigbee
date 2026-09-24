@@ -1,0 +1,18 @@
+{
+  "author": "TecnoSimples Tecnologia LTDA",
+  "gitHubUrl": "https://github.com/tecnosimples/hubzigbee",
+  "payPalUrl": "",
+  "packages": [
+    {
+      "name": "HubZigbee",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/tecnosimples/hubzigbee/main/packageManifest.json",
+      "description": "Gateway Zigbee satélite para Hubitat: os aparelhos pareados no HubZigbee chegam como devices nativos (interruptor, teclas, contato, energia). Produto TecnoSimples.",
+      "tags": [
+        "Zigbee",
+        "Local",
+        "Integrations"
+      ]
+    }
+  ]
+}

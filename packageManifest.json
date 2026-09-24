@@ -1,0 +1,24 @@
+{
+  "packageName": "HubZigbee",
+  "author": "TecnoSimples Tecnologia LTDA",
+  "version": "1.0.0",
+  "minimumHEVersion": "2.3.0",
+  "dateReleased": "2026-09-24",
+  "licenseFile": "https://raw.githubusercontent.com/tecnosimples/hubzigbee/main/LICENSE",
+  "drivers": [
+    {
+      "id": "7df8d0bf-d711-413c-880b-60f6e0323590",
+      "name": "HubZigbee",
+      "namespace": "tecnosimples",
+      "location": "https://raw.githubusercontent.com/tecnosimples/hubzigbee/main/drivers/HubZigbee.groovy",
+      "required": true
+    },
+    {
+      "id": "66b58bf2-81b6-4e37-9e54-7e176d94dbc7",
+      "name": "HubZigbee Module",
+      "namespace": "tecnosimples",
+      "location": "https://raw.githubusercontent.com/tecnosimples/hubzigbee/main/drivers/HubZigbee-Module.groovy",
+      "required": true
+    }
+  ]
+}
