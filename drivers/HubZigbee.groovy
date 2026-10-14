@@ -6,11 +6,11 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.0.0
+ * Versao do pacote: 1.1.0
  */
 import groovy.json.JsonSlurper
 import groovy.transform.Field
-@Field static final String VERSAO = "2.0.1"
+@Field static final String VERSAO = "2.1.0"
 @Field static final Integer PORTA_HUB = 39501
 metadata {
 definition(name: "HubZigbee", namespace: "tecnosimples", author: "TecnoSimples") {
@@ -23,15 +23,22 @@ attribute "uptime", "number"
 attribute "canalZigbee", "number"
 attribute "devices", "number"
 attribute "ultimoContato", "string"
+attribute "firmware", "string"
+attribute "atualizacao", "string"
 command "definirIp", [[name: "IP", type: "STRING", description: "IP do gateway, para configurar sem abrir a página"]]
-command "parear", [[name: "Duração (s)", type: "NUMBER", description: "Janela de pareamento, padrão 180"]]
+command "parear", [[name: "Duração (s)", type: "NUMBER", description: "Janela de pareamento, padrão 180"],
+[name: "Aparelho antigo (HA 1.2)", type: "ENUM", constraints: ["nao", "sim", "revogar"],
+description: "Só para aparelho que não entra na janela normal (ex.: fechadura Yale)"]]
 command "sincronizar"
 command "acionar", [[name: "IEEE", type: "STRING"], [name: "Endpoint", type: "NUMBER"],
 [name: "Ação", type: "STRING", description: "on, off ou toggle"]]
+command "atualizarFirmware"
 command "removerDevice", [[name: "IEEE", type: "STRING", description: "IEEE de 16 dígitos do device a expulsar"]]
 }
 preferences {
 input name: "ip", type: "text", title: "IP do gateway", description: "Ex.: 10.0.1.160", required: true
+input name: "senhaUnidade", type: "password", title: "Senha da unidade (etiqueta do gateway)",
+description: "Usada para DESTRANCAR fechaduras e para o gateway aceitar este hub se o IP dele mudar. Sem ela, destrancar fica bloqueado."
 input name: "intervaloSaude", type: "enum", title: "Checagem de saúde",
 options: [["1": "1 minuto"], ["5": "5 minutos"], ["15": "15 minutos"]], defaultValue: "5"
 input name: "criarFilhos", type: "bool", title: "Criar módulos e canais automaticamente", defaultValue: true
@@ -135,6 +142,11 @@ case "dev":
 log.info "Device novo na rede Zigbee: ${dados.ieee} (${dados.fab} ${dados.mod})"
 runIn(3, "sincronizar")
 break
+case "ota":
+sendEvent(name: "atualizacao", value: textoAtualizacao(dados))
+if (dados.ver) sendEvent(name: "firmware", value: dados.ver as String)
+log.info "Atualização do gateway: ${textoAtualizacao(dados)}"
+break
 default:
 if (logando()) log.debug "Mensagem não reconhecida: ${dados}"
 }
@@ -153,6 +165,16 @@ modulo.tratarEventoDoGateway(dados.ep, dados.a as String, dados.v)
 }
 def enviarComando(String ieee, Integer ep, String tipo, Map extras = [:]) {
 Map query = [ieee: ieee, ep: ep, tipo: tipo] + extras
+if (tipo == "tranca" && extras.valor == "unlock") {
+if (!senhaUnidade) {
+log.warn "Destrancar bloqueado: preencha 'Senha da unidade' nas preferências de ${device.displayName}"
+return
+}
+if (!alvo()) { log.warn "Sem IP do gateway"; return }
+asynchttpPost("respostaGenerica", [uri: "http://${alvo()}", path: "/api/cmd", query: query, timeout: 10,
+headers: ["X-TS-Auth": senhaUnidade]], [caminho: "/api/cmd"])
+return
+}
 chamar("/api/cmd", query)
 }
 def acionar(String ieee, valor, String acao) {
@@ -168,10 +190,35 @@ enviarComando(ieee, ep, "onoff", [valor: a])
 def atualizarDevice(String ieee) {
 chamar("/api/atualizar", [ieee: ieee])
 }
-def parear(valor = null) {
+def atualizarFirmware() {
+log.info "Pedindo atualização de firmware ao gateway"
+sendEvent(name: "atualizacao", value: "pedido enviado")
+asynchttpPost("respostaFirmware", [uri: "http://${alvo()}", path: "/api/firmware", timeout: 10])
+}
+def respostaFirmware(resposta, Map dados) {
+final Map texto = [202: "consultando", 409: "ocupado: já há atualização em andamento",
+401: "recusado: hub não reconhecido pelo gateway",
+404: "não suportado por este firmware"]
+final String valor = texto[resposta.status as Integer] ?: "erro HTTP ${resposta.status}"
+sendEvent(name: "atualizacao", value: valor)
+if (resposta.status != 202) log.warn "atualizarFirmware: ${valor}"
+}
+private String textoAtualizacao(Map d) {
+switch (d.estado) {
+case "baixando": return "baixando ${d.progresso}%"
+case "atualizado": return "atualizado para ${d.ver}"
+case "desfeita": return d.erro ? "atualização desfeita (${d.erro})" : "atualização desfeita"
+case "erro":
+case "falhou": return "${d.estado}: ${d.erro}"
+default: return d.estado as String
+}
+}
+def parear(valor = null, antigo = null) {
 final Integer dur = (valor ?: 180) as Integer
-log.info "Abrindo janela de pareamento por ${dur}s"
-chamar("/api/parear", [dur: dur])
+final String a = antigo?.toString()
+log.info "Abrindo janela de pareamento por ${dur}s" + (a == "sim" ? " — aceitando aparelho antigo (HA 1.2)" : "") +
+(a == "revogar" ? " — rede deixa de aceitar aparelho antigo" : "")
+chamar("/api/parear", a == "sim" ? [dur: dur, legado: 1] : (a == "revogar" ? [dur: dur, legado: 0] : [dur: dur]))
 }
 def removerDevice(String ieee) {
 if (!ieee || ieee.length() != 16) {
@@ -205,6 +252,10 @@ asynchttpGet("respostaGenerica", params, [caminho: caminho])
 }
 def respostaGenerica(resposta, Map dados) {
 if (resposta.status != 200) {
+if (dados.caminho == "/api/assinar" && resposta.status == 401) {
+log.error "O gateway recusou este hub (o IP do hub mudou?). Preencha 'Senha da unidade' nas preferências de ${device.displayName} — sem isso os eventos não chegam."
+return
+}
 log.warn "${dados.caminho} devolveu ${resposta.status}"
 return
 }
@@ -233,13 +284,19 @@ sendEvent(name: "uptime", value: (info.uptime ?: 0) as Integer, unit: "s")
 sendEvent(name: "canalZigbee", value: (info.canal ?: 0) as Integer)
 sendEvent(name: "devices", value: (info.devices ?: 0) as Integer)
 state.firmware = "${info.fw} ${info.ver}"
+if (info.ver) sendEvent(name: "firmware", value: info.ver as String)
 state.pan = info.pan
 final String mac = info.mac?.replaceAll(":", "")?.toUpperCase()
 if (dados.ajustarDni && mac && device.deviceNetworkId != mac) {
 log.info "Ajustando DNI para o MAC do gateway: ${mac}"
 device.deviceNetworkId = mac
 }
+if (senhaUnidade) {
+asynchttpPost("respostaGenerica", [uri: "http://${alvo()}", path: "/api/assinar", query: [porta: PORTA_HUB],
+timeout: 10, headers: ["X-TS-Auth": senhaUnidade]], [caminho: "/api/assinar"])
+} else {
 chamar("/api/assinar", [porta: PORTA_HUB])
+}
 if (dados.ajustarDni) {
 runIn(4, "sincronizar")
 }

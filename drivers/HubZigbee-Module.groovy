@@ -6,13 +6,14 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.0.0
+ * Versao do pacote: 1.1.0
  */
 import groovy.transform.Field
 metadata {
 definition(name: "HubZigbee Module", namespace: "tecnosimples", author: "TecnoSimples") {
 capability "Refresh"
 capability "Actuator"
+capability "Battery"
 capability "PresenceSensor"
 attribute "ieee", "string"
 attribute "fabricante", "string"
@@ -21,6 +22,7 @@ attribute "canais", "number"
 attribute "preparado", "string"
 attribute "ultimoContato", "string"
 attribute "homologacao", "string"
+attribute "ultimaOperacao", "string"
 command "recriarCanais"
 command "remover"
 command "aplicarHomologacao"
@@ -39,11 +41,17 @@ input name: "logDetalhado", type: "bool", title: "Log detalhado", defaultValue: 
 vazamento: "water", fumaca: "smoke"]
 @Field static final Map ZONA_VALOR = [contact: ["closed", "open"], motion: ["inactive", "active"],
 water: ["dry", "wet"], smoke: ["clear", "detected"]]
+@Field static final Map VIA_TEXTO = [keypad: "teclado", remote: "comando remoto", manual: "manual (botão interno ou chave)",
+rfid: "cartão", fingerprint: "biometria", auto: "trava automática"]
+@Field static final Map PROG_TEXTO = [1: "senha mestra alterada", 2: "senha adicionada", 3: "senha removida",
+4: "senha alterada", 5: "cartão ou biometria adicionado",
+6: "cartão ou biometria removido"]
 @Field static final Map DRIVER_NATIVO = [
 interruptor: "Generic Component Switch",
 dimmer: "Generic Component Dimmer",
 botoes: "Generic Component Button Controller",
 contato: "Generic Component Contact Sensor",
+tranca: "Generic Component Lock",
 movimento: "Generic Component Motion Sensor",
 vazamento: "Generic Component Water Sensor",
 fumaca: "Generic Component Smoke Detector",
@@ -58,6 +66,18 @@ status: "homologado", fonte: "bancada", data: "2026-09-22",
 funcoes: [
 [tipo: "contato", rotulo: "Contato", chave: "e1",
 entradas: ["contact": "e1-c1280"], conversao: [bit: 0]]
+]
+],
+"ASSA ABLOY iRevo|06ffff2029": [
+status: "homologado", fonte: "bancada", data: "2026-10-13", bateriaInteira: true,
+funcoes: [
+[tipo: "tranca", rotulo: "Fechadura", chave: "e1", entradas: ["lock": "e1-c257"]]
+]
+],
+"ASSA ABLOY iRevo|iZBModule01": [
+status: "homologado", fonte: "bancada", data: "2026-10-13", bateriaInteira: true,
+funcoes: [
+[tipo: "tranca", rotulo: "Fechadura", chave: "e1", entradas: ["lock": "e1-c257"]]
 ]
 ]
 ]
@@ -90,7 +110,9 @@ if (!(dev.fab) || !(dev.mod)) {
 if (logando()) log.debug "sem fabricante/modelo — mantém o que existe"
 return
 }
-final Map r = classificar(dev, fichaDoCatalogo(dev.fab as String, dev.mod as String))
+final Map ficha = fichaDoCatalogo(dev.fab as String, dev.mod as String)
+state.bateriaInteira = (ficha?.bateriaInteira == true)
+final Map r = classificar(dev, ficha)
 aplicarClassificacao(r)
 }
 private void aplicarClassificacao(Map r) {
@@ -126,6 +148,40 @@ log.error "Falha ao criar ${f.dni}: ${e.message}"
 }
 def tratarEventoDoGateway(ep, String atributo, def valor) {
 marcarVivo()
+if (atributo == "lockResult") {
+state.lockResult = valor
+if (valor != "ok") { log.warn "${device.displayName}: comando de fechadura sem efeito (${valor})" }
+return
+}
+if (atributo == "battery") {
+if (state.bateriaInteira) { valor = Math.min(100, (valor as Integer) * 2) }
+sendEvent(name: "battery", value: valor, unit: "%")
+getChildDevices()?.findAll { it.hasCapability("Battery") }?.each {
+it.parse([[name: "battery", value: valor, unit: "%", descriptionText: "${it.displayName} bateria ${valor}%"]])
+}
+return
+}
+if (atributo == "lockProg" && valor instanceof Map) {
+final String texto = "cadastro — ${PROG_TEXTO[valor.code as Integer] ?: 'alteração ' + valor.code}" +
+((valor.user != null && valor.user != 65535) ? " (usuário ${valor.user})" : "")
+sendEvent(name: "ultimaOperacao", value: texto, isStateChange: true)
+log.info "${device.displayName}: ${texto}"
+return
+}
+if (atributo == "lockOp" && valor instanceof Map) {
+final String estado = valor.s == "locked" ? "trancada" : "destrancada"
+final String texto = "${estado} — ${VIA_TEXTO[valor.via as String] ?: 'origem desconhecida'}" +
+(valor.user != null ? " (usuário ${valor.user})" : "")
+sendEvent(name: "ultimaOperacao", value: texto, isStateChange: true)
+final Map r = acharRota(ep, atributo)
+def tranca = r ? getChildDevice(r.dni) : null
+if (tranca) {
+tranca.parse([[name: "lock", value: valor.s, type: (valor.via == "remote" ? "digital" : "physical"),
+descriptionText: "${tranca.displayName} ${texto}",
+data: [method: valor.via, codeNumber: valor.user]]])
+}
+return
+}
 final Map rota = acharRota(ep, atributo)
 if (!rota) {
 state[atributo] = valor
@@ -168,6 +224,7 @@ case "humidity": return 1029
 case "illuminance": return 1024
 case "occupancy": return 1030
 case "zone": return 1280
+case "lock": case "lockResult": case "lockOp": case "lockProg": return 257
 case "power": return 2820
 case "energy": return 1794
 default: return -1
@@ -206,6 +263,11 @@ rotas[chaveRota(ep, 8)] = [dni, null]
 final String dni = dniDe(ieee, "interruptor", ep)
 funcoes << [tipo: "interruptor", rotulo: "canal ${ep}", dni: dni, ep: ep]
 rotas[chaveRota(ep, 6)] = [dni, null]
+}
+if (entrada.contains(257)) {
+final String dni = dniDe(ieee, "tranca", ep)
+funcoes << [tipo: "tranca", rotulo: "Fechadura", dni: dni, ep: ep]
+rotas[chaveRota(ep, 257)] = [dni, null]
 }
 if (entrada.contains(1026) || entrada.contains(1029)) {
 final String dni = dniDe(ieee, "tempumidade", ep)
@@ -291,6 +353,12 @@ def componentOff(cd) { comandarFilho(cd, "onoff", [valor: "off"]) }
 def componentSetLevel(cd, nivel, duracao = null) {
 comandarFilho(cd, "nivel", [valor: nivel as Integer, t: (duracao ?: 0) as Integer])
 }
+def componentLock(cd) { comandarFilho(cd, "tranca", [valor: "lock"]) }
+def componentUnlock(cd) { comandarFilho(cd, "tranca", [valor: "unlock"]) }
+def componentSetCode(cd, pos, pin, nome = null) { log.warn "${cd.displayName}: cadastro de senha pelo hub não é suportado" }
+def componentDeleteCode(cd, pos) { log.warn "${cd.displayName}: remoção de senha pelo hub não é suportada" }
+def componentGetCodes(cd) { log.warn "${cd.displayName}: leitura de senhas pelo hub não é suportada" }
+def componentSetCodeLength(cd, tam) { log.warn "${cd.displayName}: tamanho de senha pelo hub não é suportado" }
 def componentRefresh(cd) { parent.atualizarDevice(device.deviceNetworkId) }
 def componentPush(cd, botao) { cd.parse([[name: "pushed", value: botao, isStateChange: true]]) }
 def componentDoubleTap(cd, botao) { cd.parse([[name: "doubleTapped", value: botao, isStateChange: true]]) }
@@ -391,6 +459,10 @@ espera: ["botoes"]],
 dev: [ieee: "A4C1385D71FD3FB1", fab: "_TZ3000_8yhypbo7", mod: "TS0203", zona: 21, eps: [
 [ep: 1, devId: 0x0402, in: [1,3,1280,0], out: [3,4,5,6,8,4096,25,10]]]],
 espera: ["contato-e1"]],
+[nome: "Yale fechadura (Door Lock)",
+dev: [ieee: "000D6F0016FD7798", fab: "ASSA ABLOY iRevo", mod: "06ffff2029", eps: [
+[ep: 1, devId: 0x000A, in: [0,1,3,4,5,9,10,32,257], out: [10,25]]]],
+espera: ["tranca-e1"]],
 [nome: "TS0203 sem zone type",
 dev: [ieee: "A4C1385D71FD3FB1", fab: "_TZ3000_8yhypbo7", mod: "TS0203", eps: [
 [ep: 1, devId: 0x0402, in: [1,3,1280,0], out: []]]],
