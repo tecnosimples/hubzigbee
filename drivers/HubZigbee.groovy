@@ -6,11 +6,11 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.1.0
+ * Versao do pacote: 1.2.0
  */
 import groovy.json.JsonSlurper
 import groovy.transform.Field
-@Field static final String VERSAO = "2.1.0"
+@Field static final String VERSAO = "2.2.0"
 @Field static final Integer PORTA_HUB = 39501
 metadata {
 definition(name: "HubZigbee", namespace: "tecnosimples", author: "TecnoSimples") {
@@ -34,6 +34,7 @@ command "acionar", [[name: "IEEE", type: "STRING"], [name: "Endpoint", type: "NU
 [name: "Ação", type: "STRING", description: "on, off ou toggle"]]
 command "atualizarFirmware"
 command "removerDevice", [[name: "IEEE", type: "STRING", description: "IEEE de 16 dígitos do device a expulsar"]]
+command "redescobrirDevice", [[name: "IEEE", type: "STRING", description: "Refaz a descoberta (aparelho a pilha: acorde-o antes)"]]
 }
 preferences {
 input name: "ip", type: "text", title: "IP do gateway", description: "Ex.: 10.0.1.160", required: true
@@ -215,10 +216,31 @@ default: return d.estado as String
 }
 def parear(valor = null, antigo = null) {
 final Integer dur = (valor ?: 180) as Integer
+if (dur < 1 || dur > 254) { log.warn "Duração de pareamento inválida: ${dur} s (use 1 a 254)"; return }
 final String a = antigo?.toString()
-log.info "Abrindo janela de pareamento por ${dur}s" + (a == "sim" ? " — aceitando aparelho antigo (HA 1.2)" : "") +
-(a == "revogar" ? " — rede deixa de aceitar aparelho antigo" : "")
-chamar("/api/parear", a == "sim" ? [dur: dur, legado: 1] : (a == "revogar" ? [dur: dur, legado: 0] : [dur: dur]))
+if (a == "sim") {
+if (!senhaUnidade) {
+log.warn "Aparelho antigo bloqueado: preencha 'Senha da unidade' nas preferências de ${device.displayName}"
+return
+}
+if (!alvo()) { log.warn "Sem IP do gateway"; return }
+log.info "Abrindo janela de pareamento por ${dur}s — aceitando aparelho antigo (HA 1.2)"
+asynchttpPost("respostaGenerica", [uri: "http://${alvo()}", path: "/api/parear", query: [dur: dur, legado: 1], timeout: 10,
+headers: ["X-TS-Auth": senhaUnidade]], [caminho: "/api/parear"])
+return
+}
+log.info "Abrindo janela de pareamento por ${dur}s" + (a == "revogar" ? " — rede deixa de aceitar aparelho antigo" : "")
+chamar("/api/parear", a == "revogar" ? [dur: dur, legado: 0] : [dur: dur])
+}
+def redescobrirDevice(String ieee) {
+if (!ieee || ieee.length() != 16) {
+log.warn "IEEE inválido: ${ieee}"
+return
+}
+if (!alvo()) { log.warn "Sem IP do gateway"; return }
+log.info "Redescobrindo ${ieee}"
+asynchttpPost("respostaGenerica", [uri: "http://${alvo()}", path: "/api/redescobrir", query: [ieee: ieee], timeout: 10],
+[caminho: "/api/redescobrir"])
 }
 def removerDevice(String ieee) {
 if (!ieee || ieee.length() != 16) {
@@ -254,6 +276,10 @@ def respostaGenerica(resposta, Map dados) {
 if (resposta.status != 200) {
 if (dados.caminho == "/api/assinar" && resposta.status == 401) {
 log.error "O gateway recusou este hub (o IP do hub mudou?). Preencha 'Senha da unidade' nas preferências de ${device.displayName} — sem isso os eventos não chegam."
+return
+}
+if (dados.caminho == "/api/parear" && resposta.status == 401) {
+log.error "O gateway recusou o pareamento de aparelho antigo: confira a 'Senha da unidade' nas preferências de ${device.displayName}."
 return
 }
 log.warn "${dados.caminho} devolveu ${resposta.status}"

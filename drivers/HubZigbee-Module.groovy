@@ -6,7 +6,7 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.1.0
+ * Versao do pacote: 1.2.0
  */
 import groovy.transform.Field
 metadata {
