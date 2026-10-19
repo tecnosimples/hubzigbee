@@ -6,11 +6,11 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.2.0
+ * Versao do pacote: 2.3.0
  */
 import groovy.json.JsonSlurper
 import groovy.transform.Field
-@Field static final String VERSAO = "2.2.0"
+@Field static final String VERSAO = "2.3.0"
 @Field static final Integer PORTA_HUB = 39501
 metadata {
 definition(name: "HubZigbee", namespace: "tecnosimples", author: "TecnoSimples") {

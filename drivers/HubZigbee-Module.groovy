@@ -6,7 +6,7 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 1.2.0
+ * Versao do pacote: 2.3.0
  */
 import groovy.transform.Field
 metadata {
@@ -197,7 +197,14 @@ filho.parse([[name: nome, value: botao, isStateChange: true,
 descriptionText: "${filho.displayName} botão ${botao}"]])
 return
 }
-final def v = ZONA_VALOR[nome] ? ZONA_VALOR[nome][(valor as Integer) & 1] : valor
+def v
+if (ZONA_VALOR[nome]) {
+v = ZONA_VALOR[nome][(valor as Integer) & 1]
+} else if (nome == "level") {
+v = nivelDoZcl(valor as Integer)
+} else {
+v = valor
+}
 filho.parse([[name: nome, value: v, descriptionText: "${filho.displayName} ${nome} ${v}"]])
 }
 private Map acharRota(ep, String atributo) {
@@ -350,8 +357,23 @@ return (ep == null) ? "${ieee}-${tipo}".toString() : "${ieee}-${tipo}-e${ep}".to
 }
 def componentOn(cd) { comandarFilho(cd, "onoff", [valor: "on"]) }
 def componentOff(cd) { comandarFilho(cd, "onoff", [valor: "off"]) }
+private Integer nivelParaZcl(Integer pct) {
+if (pct == null) { return 0 }
+if (pct >= 100) { return 254 }
+if (pct <= 0) { return 0 }
+return (int)(((long)pct * 254L) / 100L)
+}
+private Integer nivelDoZcl(Integer zcl) {
+if (zcl == null) { return 0 }
+if (zcl >= 254) { return 100 }
+if (zcl <= 0) { return 0 }
+return (int)(((long)zcl * 100L + 127L) / 254L)
+}
 def componentSetLevel(cd, nivel, duracao = null) {
-comandarFilho(cd, "nivel", [valor: nivel as Integer, t: (duracao ?: 0) as Integer])
+comandarFilho(cd, "nivel", [valor: nivelParaZcl(nivel as Integer), t: (duracao ?: 0) as Integer])
+}
+def componentPresetLevel(cd, nivel) {
+comandarFilho(cd, "nivel", [valor: nivelParaZcl(nivel as Integer), t: 0])
 }
 def componentLock(cd) { comandarFilho(cd, "tranca", [valor: "lock"]) }
 def componentUnlock(cd) { comandarFilho(cd, "tranca", [valor: "unlock"]) }
