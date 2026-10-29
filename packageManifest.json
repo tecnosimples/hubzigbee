@@ -1,9 +1,9 @@
 {
   "packageName": "HubZigbee",
   "author": "TecnoSimples Tecnologia LTDA",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "minimumHEVersion": "2.3.0",
-  "dateReleased": "2026-10-19",
+  "dateReleased": "2026-10-29",
   "licenseFile": "https://raw.githubusercontent.com/tecnosimples/hubzigbee/main/LICENSE",
   "drivers": [
     {

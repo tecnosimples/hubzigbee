@@ -6,11 +6,11 @@
  * (c) 2026 TecnoSimples - Todos os direitos reservados.
  *
  * Produto licenciado. Distribuido via Hubitat Package Manager.
- * Versao do pacote: 2.3.0
+ * Versao do pacote: 2.4.0
  */
 import groovy.json.JsonSlurper
 import groovy.transform.Field
-@Field static final String VERSAO = "2.3.0"
+@Field static final String VERSAO = "2.4.0"
 @Field static final Integer PORTA_HUB = 39501
 metadata {
 definition(name: "HubZigbee", namespace: "tecnosimples", author: "TecnoSimples") {
@@ -38,7 +38,7 @@ command "redescobrirDevice", [[name: "IEEE", type: "STRING", description: "Refaz
 }
 preferences {
 input name: "ip", type: "text", title: "IP do gateway", description: "Ex.: 10.0.1.160", required: true
-input name: "senhaUnidade", type: "password", title: "Senha da unidade (etiqueta do gateway)",
+input name: "senhaUnidade", type: "password", title: "Senha de administração do gateway (criada no 1º acesso)",
 description: "Usada para DESTRANCAR fechaduras e para o gateway aceitar este hub se o IP dele mudar. Sem ela, destrancar fica bloqueado."
 input name: "intervaloSaude", type: "enum", title: "Checagem de saúde",
 options: [["1": "1 minuto"], ["5": "5 minutos"], ["15": "15 minutos"]], defaultValue: "5"
@@ -168,7 +168,7 @@ def enviarComando(String ieee, Integer ep, String tipo, Map extras = [:]) {
 Map query = [ieee: ieee, ep: ep, tipo: tipo] + extras
 if (tipo == "tranca" && extras.valor == "unlock") {
 if (!senhaUnidade) {
-log.warn "Destrancar bloqueado: preencha 'Senha da unidade' nas preferências de ${device.displayName}"
+log.warn "Destrancar bloqueado: preencha 'Senha de administração do gateway' nas preferências de ${device.displayName}"
 return
 }
 if (!alvo()) { log.warn "Sem IP do gateway"; return }
@@ -220,7 +220,7 @@ if (dur < 1 || dur > 254) { log.warn "Duração de pareamento inválida: ${dur} 
 final String a = antigo?.toString()
 if (a == "sim") {
 if (!senhaUnidade) {
-log.warn "Aparelho antigo bloqueado: preencha 'Senha da unidade' nas preferências de ${device.displayName}"
+log.warn "Aparelho antigo bloqueado: preencha 'Senha de administração do gateway' nas preferências de ${device.displayName}"
 return
 }
 if (!alvo()) { log.warn "Sem IP do gateway"; return }
